@@ -19,8 +19,8 @@ class Chef
 
       option :server_name,
         :short => "-S NAME",
-        :long => "--server-name <name>",
-        :description => "The Joyent server name"
+        :long => "--server-name NAME",
+        :description => "The Joyent server name (may contain letters, numbers, dashes, and periods)"
 
       option :chef_node_name,
         :short => "-N NAME",
@@ -64,6 +64,12 @@ class Chef
         :boolean => true,
         :default => false
 
+      option :tags,
+        :long => "--tags JSON",
+        :description => "JSON-encoded {key:value} pairs tag server with",
+        :proc => Proc.new { |m| JSON.parse(m) },
+        :default => nil
+
       option :ssh_user,
         :short => "-x USERNAME",
         :long => "--ssh-user USERNAME",
@@ -97,6 +103,13 @@ class Chef
         :description => "Disable host key verification",
         :boolean => true,
         :default => false
+
+      option :ssh_gateway,
+        :short => "-gw GATEWAY",
+        :long => "--ssh-gateway GATEWAY",
+        :description => "The ssh gateway server",
+        :proc => Proc.new { |key| Chef::Config[:knife][:ssh_gateway] = key }
+
 
       def is_linklocal(ip)
         linklocal = IPAddr.new "169.254.0.0/16"
@@ -155,15 +168,23 @@ class Chef
         Chef::Log.debug("Bootstrap IP Address #{bootstrap_ip}")
         puts "\n"
         puts ui.color("Bootstrap IP Address #{bootstrap_ip}", :cyan)
+
+        if config[:tags]
+          tags = [ ui.color('Name', :bold), ui.color('Value', :bold) ]
+
+          server.add_tags(config[:tags]).each do |k,v|
+            tags << k
+            tags << v
+          end
+
+          puts ui.color("Updated tags for #{@node_name}", :cyan)
+          puts ui.list(tags, :uneven_columns_across, 2)
+        end
+
         if Chef::Config[:knife][:provisioner]
+          tags = [ ui.color('Name', :bold), ui.color('Value', :bold) ]
           # tag the provision with 'provisioner'
-          tagkey = 'provisioner'
-          tagvalue = Chef::Config[:knife][:provisioner]
-          tags = [
-            ui.color('Name', :bold),
-            ui.color('Value', :bold),
-          ]
-          server.add_tags({tagkey => tagvalue}).each do |k, v|
+          server.add_tags({'provisioner' => Chef::Config[:knife][:provisioner]}).each do |k, v|
             tags << k
             tags << v
           end
@@ -180,6 +201,7 @@ class Chef
         msg_pair("Type", server.type)
         msg_pair("Dataset", server.dataset)
         msg_pair("IPs", server.ips.join(" "))
+        msg_pair("Tags", config[:tags]) if config[:tags]
         msg_pair("JSON Attributes",config[:json_attributes]) unless config[:json_attributes].empty?
 
         puts ui.color("Waiting for server to fully initialize...", :cyan)
@@ -187,26 +209,12 @@ class Chef
 
         puts ui.color("Waiting for SSH to come up on: #{bootstrap_ip}", :cyan)
         tcp_test_ssh(bootstrap_ip)
+        sleep 10
 
         bootstrap_for_node(server, bootstrap_ip).run
 
-      rescue Excon::Errors::Conflict => e
-        if e.response && e.response.body.kind_of?(String)
-          error = ::Fog::JSON.decode(e.response.body)
-          print ui.error(error['message'])
-          if error.key?('errors') && error['errors'].kind_of?(Array)
-            error['errors'].each do |err|
-              print ui.error " * [#{err['field']}] #{err['message']}"
-            end
-          end
-          exit 1
-        else
-          puts ui.error(e.message)
-          exit 1
-        end
-
       rescue => e
-        puts ui.error('Unexpected Error Occured:' + e.inspect)
+        output_error(e)
         exit 1
       end
 
@@ -222,9 +230,6 @@ class Chef
         Chef::Log.debug("Bootstrap ssh_user = #{config[:ssh_user]}")
         bootstrap.config[:ssh_user] = config[:ssh_user]
 
-        Chef::Log.debug("Bootstrap identity_file = #{config[:identity_file]}")
-        bootstrap.config[:identity_file] = config[:identity_file]
-
         Chef::Log.debug("Bootstrap chef_node_name = #{config[:chef_node_name]}")
         bootstrap.config[:chef_node_name] = config[:chef_node_name] || server.id
 
@@ -234,17 +239,28 @@ class Chef
         Chef::Log.debug("Bootstrap distro = #{config[:distro]}")
         bootstrap.config[:distro] = config[:distro]
 
-        #Chef::Log.debug("Bootstrap use_sudo = #{config[:use_sudo]}")
-        #bootstrap.config[:use_sudo] = true
+        if config[:ssh_user] == 'root'
+          bootstrap.config[:use_sudo] = false
+        else
+          bootstrap.config[:use_sudo] = true
+        end
 
-        Chef::Log.debug("Bootstrap environment = #{config[:environment]}")
+        Chef::Log.debug("Bootstrap use_sudo = #{bootstrap.config[:use_sudo]}")
+
         bootstrap.config[:environment] = config[:environment]
+        Chef::Log.debug("Bootstrap environment = #{bootstrap.config[:environment]}")
 
-        Chef::Log.debug("Bootstrap no_host_key_verify = #{config[:no_host_key_verify]}")
         bootstrap.config[:no_host_key_verify] = config[:no_host_key_verify]
+        Chef::Log.debug("Bootstrap no_host_key_verify = #{bootstrap.config[:no_host_key_verify]}")
 
-        Chef::Log.debug("Bootstrap json_attributes = #{config[:json_attributes]}")
+        bootstrap.config[:identity_file] = config[:identity_file]
+        Chef::Log.debug("Bootstrap identity_file = #{bootstrap.config[:identity_file]}")
+
+        bootstrap.config[:ssh_gateway] = config[:ssh_gateway]
+        Chef::Log.debug("Bootstrap ssh_gateway= #{bootstrap.config[:ssh_gateway]}")
+
         bootstrap.config[:first_boot_attributes] = config[:json_attributes]
+        Chef::Log.debug("Bootstrap json_attributes = #{bootstrap.config[:json_attributes]}")
 
         bootstrap
       end
@@ -256,7 +272,7 @@ class Chef
         if server_ips.count === 1
           server_ips.first
         else
-          if config[:private_network]
+          if server_ips.all? {|ip| is_private(ip)} || config[:private_network]
             server_ips.find{|ip| is_private(ip)}
           elsif server_ips.all? {|ip| is_private(ip)}
             server_ips.first
@@ -282,7 +298,7 @@ class Chef
         # add some validation here ala knife-ec2
         unless config[:server_name] || config[:chef_node_name]
           ui.error("You have not provided a valid server or node name.")
-          show_usage
+          puts show_usage
           exit 1
         end
       end

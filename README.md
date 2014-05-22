@@ -33,6 +33,7 @@ Currently available commands:
     knife joyent server resize <server_id> -f <flavor>
     knife joyent server start <server_id>
     knife joyent server stop <server_id>
+    knife joyent server pricing
     knife joyent server metadata update <server_id> -m <json>
     knife joyent server metadata delete <server_id> <options>
     knife joyent snapshot create <server_id> <snapshot_name>
@@ -43,15 +44,45 @@ Currently available commands:
     knife joyent tag delete <server_id> -A
     knife joyent tag list <server_id>
 
+    # requires joyent_version 7.1+
+    knife joyent server fw enable <server_id>
+    knife joyent server fw disable <server_id>
+    knife joyent fw get <fwrule_id>
+    knife joyent fw create (options)
+    knife joyent fw list <server_id>
+    knife joyent fw update <rule_id> (options)
+    knife joyent fw delete <rule_id> (options)
+
 ## Example Usage
 
 The following command will provision an Ubuntu 12.04 with 1GB of memory and bootstrap it with chef
 
-    knife joyent server create \
+    # knife joyent server create \
+        --joyent-api-version '~7.0' \
         --flavor "Small 1GB" \
+        --networks 42325ea0-eb62-44c1-8eb6-0af3e2f83abc,c8cde927-6277-49ca-82a3-741e8b23b02f \
         --image d2ba0f30-bbe8-11e2-a9a2-6bc116856d85 \
-        --node-name 'chefbuntu-x' \
-        --server-name 'chefbuntu-x'
+        --node-name 'cookbuntu0' \
+        --server-name 'cookbuntu0'
+
+    Creating machine cookbuntu0
+    Waiting for Server to be Provisioned
+    ....................
+    Bootstrap IP Address 165.225.150.239
+    No user defined in knife config for provision tagging -- continuing
+    Created machine:
+    ID: 9cdf6324-9769-4134-a7a8-a575c7dfcc13
+    Name: cookbuntu0
+    State: running
+    Type: virtualmachine
+    Dataset: sdc:jpc:ubuntu-12.04:2.4.2
+    IPs: 165.225.150.239 10.12.29.210
+    Waiting for server to fully initialize...
+    Waiting for SSH to come up on: 165.225.150.239
+    SSHD accepting connections on 165.225.150.239: banner is SSH-2.0-OpenSSH_5.9p1 Debian-5ubuntu1
+
+    Bootstrapping Chef on 165.225.150.239
+    ...
 
 Please see ``knife joyent server create --help`` for more options
 
@@ -89,9 +120,18 @@ to automatically unlock the key for authentication.
 
 **``joyent_api_url``**
 
-Specify a custom API endpoint, this is required if you want to specify
-where you want to provision your machines, or if you are using knife with a
-provider powered by [SmartDataCenter](http://www.joyent.com/products/smartdatacenter/).
+Specifies a custom CloudAPI endpoint, this is required if you want to manage
+machines located in another datacenter or if you want to interface with any CloudAPI
+instance powered by [SmartDataCenter](http://www.joyent.com/products/smartdatacenter/).
+
+Defaults to us-west-1
+
+Available datacenters (currently) are:
+
+    https://eu-ams-1.api.joyentcloud.com
+    https://us-west-1.api.joyentcloud.com
+    https://us-sw-1.api.joyentcloud.com
+    https://us-east-1.api.joyentcloud.com
 
     # Defaults to https://us-west-1.api.joyentcloud.com/
     knife[:joyent_api_url] = "https://us-sw-1.api.joyentcloud.com/"
@@ -111,7 +151,7 @@ the form of a hash with a single level of nesting. See the
 By default, knife-joyent will use the version of the Joyent Cloud API that fog prefers. This
 can be overridden in knife.rb as follows:
 
-    knife[:joyent_version] = "~7.0"
+    knife[:joyent_version] = "~7.1"
 
 Some command line options to knife-joyent subcommands may depend on the Joyent API version set.
 
@@ -131,6 +171,7 @@ by/from different sources / users.
  - [Sean Omera](https://github.com/someara) - Opscode
  - [Eric Saxby](https://github.com/sax) - Wanelo
  - [Stephen Lauck](https://github.com/stephenlauck) - ModCloth
+ - [Konstantin Gredeskoul](https://github.com/kigster) - Wanelo
 
 ## Bootstrap template for smartos
 

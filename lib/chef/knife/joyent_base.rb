@@ -1,4 +1,5 @@
 require 'chef/knife'
+require 'pricing'
 
 class Chef
   class Knife
@@ -77,11 +78,65 @@ class Chef
         config[key] || Chef::Config[:knife][key]
       end
 
+      def output_error(e)
+        res = case e
+        when Excon::Response
+          e
+        when Excon::Errors::Error
+          e.response
+        else
+          raise
+        end
+
+        if res.headers["Content-Type"] == 'application/json' && res.body.kind_of?(String)
+          body = json_decode(res.body)
+        else
+          body = res.body
+        end
+
+        if body['code']
+          ui.error ui.color("*#{body["code"]}*", :white)
+        end
+
+        if body['message']
+          ui.error ui.color(body["message"], :white)
+        end
+
+        if body["errors"]
+          errors = body["errors"]
+          errors.each do |e|
+            ui.error("[#{e["field"]}] #{e["message"]}")
+          end
+        end
+      end
+
       def msg_pair(label, value = nil)
         if value && !value.empty?
           puts "#{ui.color(label, :cyan)}: #{value}"
         end
       end
+
+      def json_decode(body)
+        parsed = Fog::JSON.decode(body)
+        decode_time_attrs(parsed)
+      end
+
+      def decode_time_attrs(obj)
+        if obj.kind_of?(Hash)
+          obj["created"] = Time.parse(obj["created"]) unless obj["created"].nil? or obj["created"] == ''
+          obj["updated"] = Time.parse(obj["updated"]) unless obj["updated"].nil? or obj["updated"] == ''
+        elsif obj.kind_of?(Array)
+          obj.map do |o|
+            decode_time_attrs(o)
+          end
+        end
+        obj
+      end
+
+      def pricing
+        @pricing ||= Joyent::Cloud::Pricing::Formatter.new(Joyent::Cloud::Pricing::Configuration.instance)
+      end
+
     end
   end
 end
